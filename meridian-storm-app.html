@@ -1,0 +1,1316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Meridian — Storm Analysis</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{
+  --void:#0a0d12;
+  --surface:#12161d;
+  --surface-2:#171d26;
+  --surface-3:#1d242f;
+  --line:rgba(255,255,255,0.08);
+  --line-soft:rgba(255,255,255,0.05);
+  --text:#e9edf3;
+  --text-dim:#8b96a5;
+  --text-faint:#5a6474;
+  --blue:#4da3ff;
+  --blue-dim:rgba(77,163,255,0.14);
+  --amber:#ff9f0a;
+  --red:#ff453a;
+  --magenta:#c964e0;
+  --green:#34c759;
+  --cyan:#5ee6d0;
+  --radius:16px;
+  --radius-sm:10px;
+  --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",Inter,"Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{height:100%;}
+body{
+  margin:0;
+  font-family:var(--sans);
+  background:var(--void);
+  color:var(--text);
+  overscroll-behavior:none;
+  -webkit-font-smoothing:antialiased;
+}
+body::before{
+  content:"";
+  position:fixed; inset:0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+  background-size:34px 34px;
+  mask-image:radial-gradient(ellipse 100% 60% at 50% 0%, black 40%, transparent 90%);
+  pointer-events:none;
+  z-index:0;
+}
+#app{position:relative; z-index:1; height:100vh; display:flex; flex-direction:column;}
+
+/* ---------- HEADER ---------- */
+header{
+  flex:0 0 auto;
+  padding:14px 16px 10px;
+  display:flex; align-items:center; gap:10px;
+  border-bottom:1px solid var(--line-soft);
+  backdrop-filter:blur(20px);
+}
+.brand{display:flex; align-items:center; gap:8px; flex:1; min-width:0;}
+.brand-dot{width:9px;height:9px;border-radius:50%;background:var(--blue); box-shadow:0 0 10px var(--blue); flex:0 0 auto;}
+.loc-btn{
+  display:flex; flex-direction:column; align-items:flex-start; gap:1px;
+  background:none;border:none;color:var(--text);font-family:var(--sans);
+  min-width:0; cursor:pointer; padding:0; text-align:left;
+}
+.loc-name{font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:52vw;}
+.loc-coord{font-size:11px; color:var(--text-faint); font-family:var(--mono);}
+.hbtn{
+  width:34px;height:34px;border-radius:10px;border:1px solid var(--line);
+  background:var(--surface); color:var(--text-dim); display:flex; align-items:center; justify-content:center;
+  cursor:pointer; transition:transform .15s ease, background .15s ease, color .15s ease;
+  flex:0 0 auto;
+}
+.hbtn:active{transform:scale(0.92); background:var(--surface-3); color:var(--text);}
+.hbtn svg{width:17px;height:17px;}
+
+/* ---------- MAIN ---------- */
+main{flex:1; overflow:hidden; position:relative;}
+.view{
+  position:absolute; inset:0; overflow-y:auto; padding:14px 14px 90px;
+  opacity:0; pointer-events:none; transform:translateY(6px);
+  transition:opacity .22s ease, transform .22s ease;
+}
+.view.active{opacity:1; pointer-events:auto; transform:translateY(0);}
+.view::-webkit-scrollbar{width:0;}
+
+.section-label{
+  font-size:12.5px; color:var(--text-faint); font-weight:600; margin:18px 2px 8px;
+  display:flex; align-items:center; gap:6px;
+}
+.section-label:first-child{margin-top:2px;}
+
+.card{
+  background:linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.008)) , var(--surface);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:16px;
+  margin-bottom:10px;
+  transition:border-color .15s ease, transform .1s ease;
+}
+.card:active{transform:scale(0.997);}
+.card.tight{padding:12px 14px;}
+.card-row{display:flex; align-items:center; justify-content:space-between; gap:10px;}
+
+/* ---------- HERO CONDITIONS ---------- */
+.hero{display:flex; align-items:flex-end; justify-content:space-between; gap:14px;}
+.hero-temp{font-family:var(--mono); font-size:58px; font-weight:500; line-height:1; letter-spacing:-2px;}
+.hero-temp span{font-size:26px; color:var(--text-dim); font-weight:400;}
+.hero-meta{text-align:right;}
+.hero-cond{font-size:14px; color:var(--text-dim); margin-bottom:4px;}
+.hero-feels{font-size:12px; color:var(--text-faint); font-family:var(--mono);}
+.updated-row{display:flex; justify-content:space-between; margin-top:12px; padding-top:12px; border-top:1px solid var(--line-soft);}
+.updated-row .u{font-size:11px; color:var(--text-faint); font-family:var(--mono);}
+
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+.grid3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;}
+.stat{padding:13px 14px; background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius-sm);}
+.stat-label{font-size:11px; color:var(--text-faint); margin-bottom:6px; display:flex; align-items:center; gap:5px;}
+.stat-value{font-family:var(--mono); font-size:19px; font-weight:500;}
+.stat-value small{font-size:12px; color:var(--text-dim); font-weight:400;}
+.stat-sub{font-size:10.5px; color:var(--text-faint); margin-top:3px;}
+
+.badge{
+  font-size:10.5px; padding:3px 8px; border-radius:20px; font-weight:600;
+  display:inline-flex; align-items:center; gap:4px; white-space:nowrap;
+}
+.badge.observed{background:rgba(52,199,89,0.14); color:var(--green);}
+.badge.derived{background:rgba(255,159,10,0.14); color:var(--amber);}
+.badge.beta{background:rgba(199,100,224,0.14); color:var(--magenta);}
+
+.hourly-strip{display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; margin:0 -2px;}
+.hourly-strip::-webkit-scrollbar{height:0;}
+.hcell{flex:0 0 auto; width:60px; text-align:center; padding:10px 0; background:var(--surface-2); border:1px solid var(--line); border-radius:12px;}
+.hcell .t{font-size:10.5px; color:var(--text-faint); margin-bottom:6px;}
+.hcell .v{font-family:var(--mono); font-size:14px; font-weight:600;}
+.hcell .p{font-size:10px; color:var(--blue); margin-top:4px;}
+
+.daily-row{display:flex; align-items:center; padding:9px 2px; border-bottom:1px solid var(--line-soft); gap:10px;}
+.daily-row:last-child{border:none;}
+.daily-day{width:64px; font-size:13px; font-weight:500;}
+.daily-precip{width:40px; font-size:11px; color:var(--blue); font-family:var(--mono); text-align:right;}
+.daily-bar-track{flex:1; height:4px; background:var(--surface-3); border-radius:4px; position:relative;}
+.daily-bar{position:absolute; height:100%; border-radius:4px; background:linear-gradient(90deg,var(--blue),var(--cyan));}
+.daily-range{width:96px; text-align:right; font-family:var(--mono); font-size:13px;}
+.daily-range .lo{color:var(--text-faint);}
+
+/* ---------- TABS / SEGMENTED ---------- */
+.segment{display:flex; background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:3px; gap:3px;}
+.segment button{
+  flex:1; border:none; background:none; color:var(--text-dim); font-size:12.5px; font-weight:600;
+  padding:8px 6px; border-radius:9px; cursor:pointer; font-family:var(--sans); transition:all .15s ease;
+}
+.segment button.on{background:var(--surface-3); color:var(--text); box-shadow:0 1px 0 rgba(255,255,255,0.04) inset;}
+
+/* ---------- RADAR / MAP ---------- */
+#map{width:100%; height:44vh; border-radius:var(--radius); overflow:hidden; border:1px solid var(--line);}
+.leaflet-container{background:#0a0d12;}
+.map-toolbar{display:flex; align-items:center; gap:8px; margin-top:10px;}
+.play-controls{display:flex; align-items:center; gap:8px; margin-top:10px;}
+.round-btn{
+  width:38px;height:38px;border-radius:50%; border:1px solid var(--line); background:var(--surface-2); color:var(--text);
+  display:flex; align-items:center; justify-content:center; cursor:pointer; flex:0 0 auto;
+}
+.round-btn.primary{background:var(--blue); border-color:var(--blue); color:#04101f;}
+.round-btn svg{width:15px;height:15px;}
+input[type=range]{-webkit-appearance:none; flex:1; height:4px; background:var(--surface-3); border-radius:4px; outline:none;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:var(--blue); cursor:pointer; box-shadow:0 0 0 4px rgba(77,163,255,0.15);}
+.frame-readout{display:flex; justify-content:space-between; margin-top:8px; font-family:var(--mono); font-size:11.5px; color:var(--text-dim);}
+.legend-strip{display:flex; gap:5px; margin-top:10px; height:8px; border-radius:4px; overflow:hidden;}
+.legend-strip div{flex:1;}
+
+.btn{
+  width:100%; padding:12px; border-radius:12px; border:1px solid var(--line); background:var(--surface-2);
+  color:var(--text); font-size:13.5px; font-weight:600; font-family:var(--sans); cursor:pointer; text-align:center;
+  transition:background .15s ease;
+}
+.btn:active{background:var(--surface-3);}
+.btn.accent{background:var(--blue); border-color:var(--blue); color:#04101f;}
+.btn.ghost{background:transparent;}
+.btn.danger-ghost{background:transparent; color:var(--red); border-color:rgba(255,69,58,0.3);}
+
+.callout{
+  border:1px dashed var(--line); border-radius:var(--radius-sm); padding:11px 12px; font-size:12px; color:var(--text-dim); line-height:1.5;
+  display:flex; gap:9px; align-items:flex-start; background:rgba(255,255,255,0.015);
+}
+.callout svg{width:15px;height:15px; flex:0 0 auto; margin-top:1px; color:var(--text-faint);}
+
+/* ---------- ALERT CARDS ---------- */
+.alert-card{border-radius:var(--radius); padding:0; overflow:hidden; margin-bottom:12px; border:1px solid var(--line); background:var(--surface);}
+.alert-head{padding:14px 16px; display:flex; justify-content:space-between; align-items:flex-start; gap:10px;}
+.alert-title{font-size:15px; font-weight:700;}
+.alert-area{font-size:11.5px; color:var(--text-dim); margin-top:3px;}
+.sev-strip{height:4px; width:100%;}
+.alert-body{padding:0 16px 16px;}
+.alert-meta-row{display:flex; gap:16px; margin:10px 0 12px; flex-wrap:wrap;}
+.alert-meta{font-size:11px; color:var(--text-faint);}
+.alert-meta b{display:block; color:var(--text); font-family:var(--mono); font-size:13px; font-weight:600;}
+.alert-text{
+  font-size:12.5px; line-height:1.6; color:var(--text-dim); background:var(--surface-2);
+  border-radius:var(--radius-sm); padding:12px; max-height:0; overflow:hidden; transition:max-height .3s ease;
+  border:1px solid var(--line-soft); white-space:pre-wrap;
+}
+.alert-text.open{max-height:900px; overflow-y:auto; margin-top:10px;}
+.expand-btn{font-size:12px; color:var(--blue); font-weight:600; cursor:pointer; margin-top:2px; display:inline-block;}
+.derived-panel{margin-top:12px; border-top:1px solid var(--line-soft); padding-top:12px;}
+.derived-title{font-size:11px; color:var(--amber); font-weight:700; margin-bottom:8px; display:flex; align-items:center; gap:5px;}
+.risk-bars{display:flex; flex-direction:column; gap:8px;}
+.risk-row{display:flex; align-items:center; gap:10px;}
+.risk-label{width:88px; font-size:11.5px; color:var(--text-dim);}
+.risk-track{flex:1; height:6px; background:var(--surface-3); border-radius:4px; overflow:hidden;}
+.risk-fill{height:100%; border-radius:4px;}
+.risk-val{width:66px; text-align:right; font-size:11px; font-family:var(--mono); color:var(--text-dim);}
+
+/* ---------- RESEARCH ---------- */
+.tl-item{display:flex; gap:12px; padding:12px 0; border-bottom:1px solid var(--line-soft);}
+.tl-item:last-child{border:none;}
+.tl-dot-col{display:flex; flex-direction:column; align-items:center; width:10px; flex:0 0 auto;}
+.tl-dot{width:8px;height:8px;border-radius:50%;background:var(--blue); margin-top:5px;}
+.tl-line{flex:1; width:1px; background:var(--line); margin-top:4px;}
+.tl-time{font-family:var(--mono); font-size:10.5px; color:var(--text-faint); margin-bottom:3px;}
+.tl-title{font-size:13.5px; font-weight:600; margin-bottom:2px;}
+.tl-note{font-size:12.5px; color:var(--text-dim); line-height:1.5;}
+.tl-tag{display:inline-block; font-size:10px; color:var(--text-faint); border:1px solid var(--line); padding:1px 7px; border-radius:20px; margin-top:6px;}
+
+textarea, input[type=text]{
+  width:100%; background:var(--surface-2); border:1px solid var(--line); border-radius:12px; color:var(--text);
+  padding:12px 13px; font-size:13.5px; font-family:var(--sans); outline:none; resize:vertical;
+}
+textarea:focus, input[type=text]:focus{border-color:var(--blue);}
+label.field{font-size:11.5px; color:var(--text-faint); margin:10px 0 6px; display:block;}
+.file-drop{border:1px dashed var(--line); border-radius:var(--radius-sm); padding:16px; text-align:center; color:var(--text-faint); font-size:12px; cursor:pointer;}
+.doc-row{display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--line-soft);}
+.doc-row:last-child{border:none;}
+.doc-name{font-size:13px; font-weight:500;}
+.doc-size{font-size:10.5px; color:var(--text-faint); font-family:var(--mono);}
+
+/* ---------- SAT ---------- */
+.sat-frame{width:100%; border-radius:var(--radius); overflow:hidden; border:1px solid var(--line); background:#000; position:relative;}
+.sat-frame img{width:100%; display:block;}
+.sat-tag{position:absolute; top:10px; left:10px; font-size:10.5px; background:rgba(0,0,0,0.55); padding:4px 9px; border-radius:20px; font-family:var(--mono); backdrop-filter:blur(6px);}
+
+/* ---------- MODAL ---------- */
+.modal{position:fixed; inset:0; z-index:50; display:flex; align-items:flex-end; justify-content:center; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);}
+.modal.hidden{display:none;}
+.modal-sheet{width:100%; max-width:480px; background:var(--surface-2); border-radius:20px 20px 0 0; padding:18px; border:1px solid var(--line); border-bottom:none; max-height:80vh; overflow-y:auto;}
+.modal-sheet h3{margin:0 0 12px; font-size:16px;}
+.search-result{padding:11px 4px; border-bottom:1px solid var(--line-soft); cursor:pointer; display:flex; justify-content:space-between;}
+.search-result:active{background:var(--surface-3);}
+.sr-name{font-size:13.5px; font-weight:500;}
+.sr-sub{font-size:11px; color:var(--text-faint); margin-top:2px;}
+
+/* ---------- TAB BAR ---------- */
+nav#tabbar{
+  flex:0 0 auto; display:flex; padding:8px 6px calc(8px + env(safe-area-inset-bottom));
+  border-top:1px solid var(--line-soft); backdrop-filter:blur(24px);
+  background:rgba(10,13,18,0.75);
+}
+nav#tabbar button{
+  flex:1; display:flex; flex-direction:column; align-items:center; gap:3px; background:none; border:none;
+  color:var(--text-faint); font-family:var(--sans); font-size:10.5px; padding:6px 2px; cursor:pointer; border-radius:10px;
+  transition:color .15s ease;
+}
+nav#tabbar button svg{width:21px; height:21px; transition:transform .15s ease;}
+nav#tabbar button.on{color:var(--blue);}
+nav#tabbar button.on svg{transform:translateY(-1px);}
+nav#tabbar button:active svg{transform:scale(0.88);}
+
+.empty{text-align:center; padding:36px 12px; color:var(--text-faint); font-size:13px;}
+.empty svg{width:30px;height:30px; margin-bottom:10px; opacity:0.5;}
+
+.toast{
+  position:fixed; bottom:78px; left:50%; transform:translateX(-50%); background:var(--surface-3); border:1px solid var(--line);
+  padding:10px 16px; border-radius:12px; font-size:12.5px; z-index:100; opacity:0; transition:opacity .25s ease, transform .25s ease;
+  pointer-events:none; white-space:nowrap;
+}
+.toast.show{opacity:1; transform:translateX(-50%) translateY(-6px);}
+
+.spinner{width:16px;height:16px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--blue); animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+@media (min-width:720px){
+  #app{max-width:520px; margin:0 auto; border-left:1px solid var(--line-soft); border-right:1px solid var(--line-soft);}
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="netBanner" style="display:none; background:rgba(255,159,10,0.12); border-bottom:1px solid rgba(255,159,10,0.3); padding:10px 16px; font-size:12px; color:var(--amber); line-height:1.5;">
+    Live data isn't reachable from this preview. Download the file and open it in a regular browser tab (Safari/Chrome) — this app makes direct calls to public weather APIs that a sandboxed preview blocks, but a normal browser tab won't.
+  </div>
+
+  <header>
+    <div class="brand">
+      <div class="brand-dot"></div>
+      <button class="loc-btn" id="locBtn">
+        <span class="loc-name" id="locName">Locating…</span>
+        <span class="loc-coord" id="locCoord">—</span>
+      </button>
+    </div>
+    <button class="hbtn" id="refreshBtn" title="Refresh">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+    </button>
+    <button class="hbtn" id="searchBtn" title="Search location">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    </button>
+  </header>
+
+  <main>
+    <!-- ================= DASHBOARD ================= -->
+    <section class="view active" id="view-dashboard">
+      <div class="card" id="heroCard">
+        <div class="hero">
+          <div class="hero-temp" id="heroTemp">--<span>°F</span></div>
+          <div class="hero-meta">
+            <div class="hero-cond" id="heroCond">Loading conditions…</div>
+            <div class="hero-feels" id="heroFeels">Feels like —</div>
+          </div>
+        </div>
+        <div class="updated-row">
+          <span class="u" id="heroUpdated">—</span>
+          <span class="badge observed">OBSERVED</span>
+        </div>
+      </div>
+
+      <div class="grid3" id="statGrid">
+        <div class="stat"><div class="stat-label">Dew point</div><div class="stat-value" id="statDew">—</div></div>
+        <div class="stat"><div class="stat-label">Humidity</div><div class="stat-value" id="statRH">—</div></div>
+        <div class="stat"><div class="stat-label">Pressure</div><div class="stat-value" id="statPress">—</div></div>
+        <div class="stat"><div class="stat-label">Wind</div><div class="stat-value" id="statWind">—</div></div>
+        <div class="stat"><div class="stat-label">Gusts</div><div class="stat-value" id="statGust">—</div></div>
+        <div class="stat"><div class="stat-label">Visibility</div><div class="stat-value" id="statVis">—</div></div>
+      </div>
+
+      <div class="section-label">Next 24 hours</div>
+      <div class="card tight">
+        <div class="hourly-strip" id="hourlyStrip"><div class="empty" style="width:100%">Loading…</div></div>
+      </div>
+
+      <div class="section-label">7-day outlook</div>
+      <div class="card tight" id="dailyCard">
+        <div class="empty">Loading…</div>
+      </div>
+
+      <div class="section-label">Convective parameters <span class="badge derived" style="margin-left:2px">MODEL-DERIVED</span></div>
+      <div class="card">
+        <div class="grid2" id="convGrid">
+          <div class="stat"><div class="stat-label">CAPE (surface)</div><div class="stat-value" id="cvCape">—</div><div class="stat-sub">Instability fuel</div></div>
+          <div class="stat"><div class="stat-label">CIN</div><div class="stat-value" id="cvCin">—</div><div class="stat-sub">Cap strength</div></div>
+          <div class="stat"><div class="stat-label">Bulk shear est.</div><div class="stat-value" id="cvShear">—</div><div class="stat-sub">10m→500hPa vector Δ</div></div>
+          <div class="stat"><div class="stat-label">Freezing level</div><div class="stat-value" id="cvFrz">—</div><div class="stat-sub">Hail growth zone</div></div>
+        </div>
+        <div class="callout" style="margin-top:12px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>Pulled from open numerical model output (Open-Meteo), not direct observation. Values are point estimates for this location and can change run-to-run.</span>
+        </div>
+      </div>
+
+      <div class="section-label">Model comparison — 2m temperature</div>
+      <div class="card">
+        <div id="modelChartWrap"><div class="empty">Loading model runs…</div></div>
+        <div class="frame-readout" id="modelLegend"></div>
+      </div>
+    </section>
+
+    <!-- ================= RADAR ================= -->
+    <section class="view" id="view-radar">
+      <div id="map"></div>
+      <div class="play-controls">
+        <button class="round-btn" id="radarPrev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
+        <button class="round-btn primary" id="radarPlay"><svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg></button>
+        <input type="range" id="radarSlider" min="0" max="0" value="0">
+        <button class="round-btn" id="radarNext"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
+      </div>
+      <div class="frame-readout">
+        <span id="radarFrameTime">—</span>
+        <span id="radarFrameBadge" class="badge observed">OBSERVED</span>
+      </div>
+      <div class="legend-strip">
+        <div style="background:#2a5cff"></div><div style="background:#28d1d1"></div><div style="background:#2fd15a"></div>
+        <div style="background:#e8e02f"></div><div style="background:#e88a2f"></div><div style="background:#e83a3a"></div><div style="background:#c25ee0"></div>
+      </div>
+      <div class="frame-readout"><span>Light</span><span>Extreme</span></div>
+
+      <div class="section-label">Storm motion</div>
+      <div class="card">
+        <p style="font-size:12.5px; color:var(--text-dim); line-height:1.55; margin:0 0 12px">
+          Estimates a single motion vector by comparing reflectivity pixels between the two most recent observed frames near your map center, then projects it forward. This is a lightweight, experimental estimate — not a substitute for NWS storm-based tracking.
+        </p>
+        <button class="btn accent" id="analyzeMotionBtn">Estimate motion &amp; path</button>
+        <div id="motionResult" style="margin-top:12px; display:none">
+          <div class="grid2">
+            <div class="stat"><div class="stat-label">Direction (from)</div><div class="stat-value" id="motionDir">—</div></div>
+            <div class="stat"><div class="stat-label">Speed est.</div><div class="stat-value" id="motionSpeed">—</div></div>
+          </div>
+          <div class="derived-panel" style="border:none; padding-top:12px; margin-top:0">
+            <div class="derived-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="13" height="13"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              DERIVED — EXPERIMENTAL, NOT AN OFFICIAL FORECAST
+            </div>
+            <div id="motionTowns"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= SATELLITE ================= -->
+    <section class="view" id="view-satellite">
+      <div class="segment" id="satSegment">
+        <button class="on" data-sat="19">GOES-East (19)</button>
+        <button data-sat="18">GOES-West (18)</button>
+      </div>
+      <div class="segment" id="bandSegment" style="margin-top:8px">
+        <button class="on" data-band="GEOCOLOR">GeoColor</button>
+        <button data-band="13">IR (Band 13)</button>
+        <button data-band="02">Visible</button>
+      </div>
+      <div class="segment" id="viewSegment" style="margin-top:8px">
+        <button class="on" data-view-mode="still">Latest still</button>
+        <button data-view-mode="loop">Animated loop</button>
+      </div>
+
+      <div class="section-label">Latest imagery</div>
+      <div class="sat-frame">
+        <span class="sat-tag" id="satTimeTag">loading…</span>
+        <img id="satImg" alt="GOES satellite image" onerror="this.parentElement.querySelector('.sat-tag').textContent='image unavailable';">
+      </div>
+      <div class="callout" style="margin-top:10px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span>Source: NOAA/NESDIS STAR public GOES imagery feed. Auto-refreshes roughly every few minutes; actual satellite scan cadence varies by sector.</span>
+      </div>
+      <button class="btn ghost" id="satRefresh" style="margin-top:10px">Refresh image</button>
+    </section>
+
+    <!-- ================= ALERTS ================= -->
+    <section class="view" id="view-alerts">
+      <div class="section-label">Active NWS watches &amp; warnings</div>
+      <div id="alertsList"><div class="empty">Loading…</div></div>
+
+      <div class="section-label">SPC convective outlooks</div>
+      <div class="segment" id="spcSegment">
+        <button class="on" data-day="1">Day 1</button>
+        <button data-day="2">Day 2</button>
+        <button data-day="3">Day 3</button>
+      </div>
+      <div class="card tight" style="margin-top:10px; padding:6px;">
+        <img id="spcImg" style="width:100%; border-radius:12px; display:block;" alt="SPC outlook">
+      </div>
+      <a class="btn ghost" style="display:block; margin-top:8px; text-decoration:none;" href="https://www.spc.noaa.gov/products/md/" target="_blank" rel="noopener">View mesoscale discussions ↗</a>
+      <a class="btn ghost" style="display:block; margin-top:8px; text-decoration:none;" href="https://www.spc.noaa.gov/products/watch/" target="_blank" rel="noopener">View active watch text ↗</a>
+    </section>
+
+    <!-- ================= RESEARCH ================= -->
+    <section class="view" id="view-research">
+      <div class="section-label">Log an observation</div>
+      <div class="card">
+        <label class="field">What are you seeing?</label>
+        <textarea id="noteInput" rows="3" placeholder="e.g. Lowering wall cloud to the SW, rapid rotation, greenish tint to sky…"></textarea>
+        <label class="field">Tag</label>
+        <div class="segment" id="tagSegment">
+          <button class="on" data-tag="Observation">Observation</button>
+          <button data-tag="Analysis">Analysis</button>
+          <button data-tag="Reference">Reference</button>
+        </div>
+        <button class="btn accent" id="addNoteBtn" style="margin-top:12px">Add to timeline</button>
+      </div>
+
+      <div class="section-label">Storm timeline</div>
+      <div class="card" id="timelineCard"><div class="empty">No entries yet — your logged observations will appear here.</div></div>
+
+      <div class="section-label">Documents</div>
+      <div class="card">
+        <input type="file" id="fileInput" accept=".txt,.md,.csv" style="display:none">
+        <div class="file-drop" id="fileDrop">Tap to attach a text file (.txt, .md, .csv)</div>
+        <div id="docsList" style="margin-top:6px"></div>
+      </div>
+
+      <div class="section-label">Export</div>
+      <div class="card">
+        <div style="display:flex; gap:10px;">
+          <button class="btn ghost" id="exportTxtBtn">Export .TXT</button>
+          <button class="btn ghost" id="exportPdfBtn">Export .PDF</button>
+        </div>
+        <button class="btn danger-ghost" id="clearAllBtn" style="margin-top:10px">Clear all research data</button>
+      </div>
+    </section>
+  </main>
+
+  <nav id="tabbar">
+    <button class="on" data-view="dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+      Dashboard
+    </button>
+    <button data-view="radar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><path d="M12 12l6-6M12 12l0-8"/></svg>
+      Radar
+    </button>
+    <button data-view="satellite">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="10" width="7" height="7" rx="1" transform="rotate(-45 10.5 13.5)"/><path d="M13 7l4-4 4 4-4 4M3 21l4-4M14.5 9.5L17 7"/></svg>
+      Satellite
+    </button>
+    <button data-view="alerts">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      Alerts
+    </button>
+    <button data-view="research">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+      Research
+    </button>
+  </nav>
+
+  <div class="modal hidden" id="locModal">
+    <div class="modal-sheet">
+      <h3>Set location</h3>
+      <input type="text" id="searchInput" placeholder="City, town, or place name">
+      <div id="searchResults" style="margin-top:8px;"></div>
+      <button class="btn ghost" id="useGpsBtn" style="margin-top:10px">Use current location</button>
+      <button class="btn ghost" id="closeModalBtn" style="margin-top:8px">Cancel</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+(function(){
+"use strict";
+
+/* ============================================================
+   STATE
+============================================================ */
+const S = {
+  lat: 35.4676, lon: -97.5164, name: "Oklahoma City, OK",
+  tz: "auto",
+  map: null, radarLayer: null,
+  radarFrames: [], radarIndex: 0, playing: false, playTimer: null,
+  timeline: [], docs: [],
+  satSat: "19", satBand: "GEOCOLOR", satViewMode: "still",
+  spcDay: 1,
+};
+
+/* ============================================================
+   HELPERS
+============================================================ */
+function $(id){ return document.getElementById(id); }
+function toast(msg){
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast._h); toast._h = setTimeout(()=>t.classList.remove("show"), 2400);
+}
+function fmtTime(d){
+  return d.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"});
+}
+function fmtShortDate(d){
+  return d.toLocaleDateString([], {weekday:"short", month:"short", day:"numeric"});
+}
+let fetchFailCount = 0, fetchOkCount = 0, bannerShown = false;
+function maybeShowNetBanner(){
+  if(bannerShown) return;
+  if(fetchFailCount >= 3 && fetchOkCount === 0){
+    bannerShown = true;
+    $("netBanner").style.display = "block";
+  }
+}
+async function getJSON(url, opts){
+  try{
+    const r = await fetch(url, opts||{});
+    if(!r.ok) throw new Error("HTTP "+r.status+" for "+url);
+    const j = await r.json();
+    fetchOkCount++;
+    return j;
+  }catch(e){
+    fetchFailCount++;
+    maybeShowNetBanner();
+    throw e;
+  }
+}
+function deg2compass(deg){
+  const dirs = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+  return dirs[Math.round(deg/22.5)%16];
+}
+function windowStorageAvailable(){ return typeof window.storage !== "undefined"; }
+
+/* ============================================================
+   VIEW SWITCHING
+============================================================ */
+document.querySelectorAll("#tabbar button").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    document.querySelectorAll("#tabbar button").forEach(b=>b.classList.remove("on"));
+    btn.classList.add("on");
+    document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
+    $("view-"+btn.dataset.view).classList.add("active");
+    if(btn.dataset.view === "radar"){ setTimeout(()=>{ if(S.map) S.map.invalidateSize(); }, 60); }
+  });
+});
+
+/* ============================================================
+   LOCATION
+============================================================ */
+function setLocation(lat, lon, name){
+  S.lat = lat; S.lon = lon; S.name = name || S.name;
+  $("locName").textContent = S.name;
+  $("locCoord").textContent = lat.toFixed(2)+"°, "+lon.toFixed(2)+"°";
+  if(S.map){ S.map.setView([lat,lon], S.map.getZoom()); }
+  loadAll();
+}
+
+async function reverseGeocode(lat, lon){
+  try{
+    const j = await getJSON(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=10`);
+    const a = j.address || {};
+    const town = a.city || a.town || a.village || a.hamlet || a.county || "Unknown location";
+    const region = a.state_code || a.state || a.country || "";
+    return region ? `${town}, ${region}` : town;
+  }catch(e){ return `${lat.toFixed(2)}°, ${lon.toFixed(2)}°`; }
+}
+
+function initLocation(){
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(async pos=>{
+      const lat = pos.coords.latitude, lon = pos.coords.longitude;
+      const name = await reverseGeocode(lat, lon);
+      setLocation(lat, lon, name);
+    }, async ()=>{
+      const name = await reverseGeocode(S.lat, S.lon);
+      setLocation(S.lat, S.lon, name);
+      toast("Location access denied — using default location");
+    }, {timeout:6000});
+  }else{
+    setLocation(S.lat, S.lon, "Oklahoma City, OK");
+  }
+}
+
+$("locBtn").addEventListener("click", ()=> $("locModal").classList.remove("hidden"));
+$("searchBtn").addEventListener("click", ()=> $("locModal").classList.remove("hidden"));
+$("closeModalBtn").addEventListener("click", ()=> $("locModal").classList.add("hidden"));
+$("useGpsBtn").addEventListener("click", ()=>{ $("locModal").classList.add("hidden"); initLocation(); });
+
+let searchDebounce;
+$("searchInput").addEventListener("input", e=>{
+  clearTimeout(searchDebounce);
+  const q = e.target.value.trim();
+  if(q.length < 2){ $("searchResults").innerHTML = ""; return; }
+  searchDebounce = setTimeout(async ()=>{
+    try{
+      const j = await getJSON(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=6&language=en&format=json`);
+      const results = j.results || [];
+      $("searchResults").innerHTML = results.map(r=>
+        `<div class="search-result" data-lat="${r.latitude}" data-lon="${r.longitude}" data-name="${(r.name+', '+(r.admin1||r.country||'')).replace(/"/g,'')}">
+           <div><div class="sr-name">${r.name}</div><div class="sr-sub">${r.admin1?r.admin1+', ':''}${r.country||''}</div></div>
+           <div class="sr-sub">${r.latitude.toFixed(1)}, ${r.longitude.toFixed(1)}</div>
+         </div>`).join("") || `<div class="empty">No matches</div>`;
+      document.querySelectorAll(".search-result").forEach(el=>{
+        el.addEventListener("click", ()=>{
+          setLocation(parseFloat(el.dataset.lat), parseFloat(el.dataset.lon), el.dataset.name);
+          $("locModal").classList.add("hidden");
+          $("searchInput").value=""; $("searchResults").innerHTML="";
+        });
+      });
+    }catch(e){ $("searchResults").innerHTML = `<div class="empty">Search unavailable</div>`; }
+  }, 380);
+});
+
+/* ============================================================
+   DASHBOARD — Open-Meteo
+============================================================ */
+async function loadDashboard(){
+  const {lat, lon} = S;
+  $("heroCond").textContent = "Loading conditions…";
+  try{
+    const core = await getJSON(
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}`+
+      `&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,cloud_cover,pressure_msl,wind_speed_10m,wind_direction_10m,wind_gusts_10m`+
+      `&hourly=temperature_2m,relative_humidity_2m,dew_point_2m,precipitation_probability,precipitation,visibility`+
+      `&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_gusts_10m_max`+
+      `&timezone=auto&forecast_days=7&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch`
+    );
+    renderHero(core);
+    renderHourly(core);
+    renderDaily(core);
+  }catch(e){
+    $("heroCond").textContent = "Unable to load current conditions";
+    console.error(e);
+  }
+
+  let capeData = null, shearData = null;
+  try{
+    capeData = await getJSON(
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}`+
+      `&hourly=cape,convective_inhibition,freezing_level_height`+
+      `&timezone=auto&forecast_days=1`
+    );
+  }catch(e){ console.error(e); }
+  try{
+    shearData = await getJSON(
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}`+
+      `&hourly=wind_speed_10m,wind_direction_10m,wind_speed_850hPa,wind_direction_850hPa,wind_speed_500hPa,wind_direction_500hPa`+
+      `&timezone=auto&forecast_days=1&wind_speed_unit=mph`
+    );
+  }catch(e){ console.error(e); }
+  renderConvective(capeData, shearData);
+
+  try{
+    const models = await getJSON(
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}`+
+      `&hourly=temperature_2m&models=gfs_seamless,ecmwf_ifs025,icon_seamless&forecast_days=3`+
+      `&timezone=auto&temperature_unit=fahrenheit`
+    );
+    renderModelChart(models);
+  }catch(e){
+    console.error(e);
+    $("modelChartWrap").innerHTML = `<div class="empty">Model comparison unavailable right now</div>`;
+  }
+}
+
+function nearestIdx(times){
+  const now = Date.now();
+  let best=0, bd=Infinity;
+  times.forEach((t,i)=>{ const d = Math.abs(new Date(t).getTime()-now); if(d<bd){bd=d; best=i;} });
+  return best;
+}
+
+function renderHero(d){
+  const c = d.current;
+  $("heroTemp").innerHTML = Math.round(c.temperature_2m)+"<span>°F</span>";
+  $("heroCond").textContent = weatherCodeText(c.weather_code) + (c.cloud_cover!=null ? ` · ${c.cloud_cover}% cloud` : "");
+  $("heroFeels").textContent = "Feels like "+Math.round(c.apparent_temperature)+"°F";
+  $("heroUpdated").textContent = "Updated "+fmtTime(new Date(c.time));
+
+  const i = nearestIdx(d.hourly.time);
+  $("statDew").innerHTML = Math.round(d.hourly.dew_point_2m[i])+"<small>°F</small>";
+  $("statRH").innerHTML = c.relative_humidity_2m+"<small>%</small>";
+  $("statPress").innerHTML = Math.round(c.pressure_msl)+"<small> hPa</small>";
+  $("statWind").innerHTML = Math.round(c.wind_speed_10m)+"<small> mph "+deg2compass(c.wind_direction_10m)+"</small>";
+  $("statGust").innerHTML = Math.round(c.wind_gusts_10m)+"<small> mph</small>";
+  const vis = d.hourly.visibility ? d.hourly.visibility[i] : null;
+  $("statVis").innerHTML = vis!=null ? (vis/1609.34).toFixed(1)+"<small> mi</small>" : "—";
+}
+
+function weatherCodeText(code){
+  const map = {0:"Clear sky",1:"Mostly clear",2:"Partly cloudy",3:"Overcast",45:"Fog",48:"Freezing fog",
+    51:"Light drizzle",53:"Drizzle",55:"Dense drizzle",61:"Light rain",63:"Rain",65:"Heavy rain",
+    71:"Light snow",73:"Snow",75:"Heavy snow",80:"Rain showers",81:"Rain showers",82:"Violent showers",
+    95:"Thunderstorm",96:"Thunderstorm w/ hail",99:"Severe thunderstorm w/ hail"};
+  return map[code] || "—";
+}
+
+function renderHourly(d){
+  const times = d.hourly.time, temps = d.hourly.temperature_2m, pop = d.hourly.precipitation_probability;
+  const start = nearestIdx(times);
+  let html = "";
+  for(let k=0;k<24;k++){
+    const i = start+k; if(i>=times.length) break;
+    const t = new Date(times[i]);
+    html += `<div class="hcell"><div class="t">${k===0?"Now":fmtTime(t)}</div><div class="v">${Math.round(temps[i])}°</div><div class="p">${pop[i]||0}%</div></div>`;
+  }
+  $("hourlyStrip").innerHTML = html || `<div class="empty">No data</div>`;
+}
+
+function renderDaily(d){
+  const dd = d.daily;
+  const maxAll = Math.max(...dd.temperature_2m_max);
+  const minAll = Math.min(...dd.temperature_2m_min);
+  let html = "";
+  dd.time.forEach((t,i)=>{
+    const day = new Date(t+"T12:00:00");
+    const lo = dd.temperature_2m_min[i], hi = dd.temperature_2m_max[i];
+    const left = ((lo-minAll)/(maxAll-minAll+0.001))*70;
+    const width = ((hi-lo)/(maxAll-minAll+0.001))*70+8;
+    html += `<div class="daily-row">
+      <div class="daily-day">${i===0?"Today":day.toLocaleDateString([], {weekday:"short"})}</div>
+      <div class="daily-precip">${dd.precipitation_probability_max[i]||0}%</div>
+      <div class="daily-bar-track"><div class="daily-bar" style="left:${left}%; width:${width}%"></div></div>
+      <div class="daily-range"><span class="lo">${Math.round(lo)}°</span> / ${Math.round(hi)}°</div>
+    </div>`;
+  });
+  $("dailyCard").innerHTML = html;
+}
+
+function renderConvective(capeData, shearData){
+  if(capeData && capeData.hourly && capeData.hourly.time){
+    const i = nearestIdx(capeData.hourly.time);
+    const cape = capeData.hourly.cape ? capeData.hourly.cape[i] : null;
+    const cin = capeData.hourly.convective_inhibition ? capeData.hourly.convective_inhibition[i] : null;
+    const frz = capeData.hourly.freezing_level_height ? capeData.hourly.freezing_level_height[i] : null;
+    $("cvCape").innerHTML = cape!=null ? Math.round(cape)+"<small> J/kg</small>" : "n/a";
+    $("cvCin").innerHTML = cin!=null ? Math.round(cin)+"<small> J/kg</small>" : "n/a";
+    $("cvFrz").innerHTML = frz!=null ? Math.round(frz*3.281)+"<small> ft</small>" : "n/a";
+  }else{
+    $("cvCape").textContent = "n/a"; $("cvCin").textContent = "n/a"; $("cvFrz").textContent = "n/a";
+  }
+
+  if(shearData && shearData.hourly && shearData.hourly.wind_speed_850hPa && shearData.hourly.wind_speed_500hPa){
+    const i = nearestIdx(shearData.hourly.time);
+    const s1=shearData.hourly.wind_speed_850hPa[i], a1=shearData.hourly.wind_direction_850hPa[i]*Math.PI/180;
+    const s2=shearData.hourly.wind_speed_500hPa[i], a2=shearData.hourly.wind_direction_500hPa[i]*Math.PI/180;
+    const u1=-s1*Math.sin(a1), v1=-s1*Math.cos(a1), u2=-s2*Math.sin(a2), v2=-s2*Math.cos(a2);
+    const shear = Math.sqrt((u2-u1)**2+(v2-v1)**2);
+    $("cvShear").innerHTML = Math.round(shear)+"<small> mph</small>";
+  }else{
+    $("cvShear").textContent = "n/a";
+  }
+}
+
+function renderModelChart(d){
+  const times = d.hourly.time;
+  const keys = Object.keys(d.hourly).filter(k=>k.startsWith("temperature_2m_"));
+  if(!keys.length){ $("modelChartWrap").innerHTML = `<div class="empty">No model data returned</div>`; return; }
+  const colors = {"gfs_seamless":"#4da3ff","ecmwf_ifs025":"#ff9f0a","icon_seamless":"#5ee6d0"};
+  const labels = {"gfs_seamless":"GFS","ecmwf_ifs025":"ECMWF","icon_seamless":"ICON"};
+  const n = Math.min(times.length, 72);
+  let allVals = [];
+  keys.forEach(k=> allVals = allVals.concat(d.hourly[k].slice(0,n).filter(v=>v!=null)));
+  const max = Math.max(...allVals), min = Math.min(...allVals);
+  const w=280, h=110, pad=6;
+  let svg = `<svg viewBox="0 0 ${w} ${h}" style="width:100%; height:${h}px; display:block;">`;
+  keys.forEach(k=>{
+    const vals = d.hourly[k].slice(0,n);
+    let path="";
+    vals.forEach((v,i)=>{
+      if(v==null) return;
+      const x = pad + (i/(n-1))*(w-2*pad);
+      const y = h-pad - ((v-min)/(max-min+0.001))*(h-2*pad);
+      path += (path?" L ":"M ")+x.toFixed(1)+" "+y.toFixed(1);
+    });
+    const col = colors[k.replace("temperature_2m_","")] || "#8b96a5";
+    svg += `<path d="${path}" fill="none" stroke="${col}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>`;
+  });
+  svg += `</svg>`;
+  $("modelChartWrap").innerHTML = svg;
+  $("modelLegend").innerHTML = keys.map(k=>{
+    const key = k.replace("temperature_2m_","");
+    return `<span style="color:${colors[key]||'#8b96a5'}">● ${labels[key]||key}</span>`;
+  }).join(" &nbsp; ");
+}
+
+$("refreshBtn").addEventListener("click", ()=>{ toast("Refreshing…"); loadAll(); });
+
+/* ============================================================
+   RADAR — Leaflet + RainViewer
+============================================================ */
+function initMap(){
+  S.map = L.map("map", {zoomControl:false, attributionControl:false}).setView([S.lat, S.lon], 7);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_matter_nolabels/{z}/{x}/{y}{r}.png", {
+    subdomains:"abcd", maxZoom:12
+  }).addTo(S.map);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_matter_only_labels/{z}/{x}/{y}{r}.png", {
+    subdomains:"abcd", maxZoom:12, opacity:0.85
+  }).addTo(S.map);
+  L.marker([S.lat, S.lon]).addTo(S.map);
+}
+
+async function loadRadar(){
+  try{
+    const meta = await getJSON("https://api.rainviewer.com/public/weather-maps.json");
+    const past = meta.radar.past || [];
+    const nowcast = meta.radar.nowcast || [];
+    const combined = past.concat(nowcast).slice(-50);
+    S.radarFrames = combined.map((f) => ({...f, kind: past.includes(f) ? "observed" : "forecast"}));
+    S.radarIndex = Math.max(0, past.length ? Math.min(past.length-1, S.radarFrames.length-1) : 0);
+    $("radarSlider").max = S.radarFrames.length-1;
+    $("radarSlider").value = S.radarIndex;
+    showRadarFrame(S.radarIndex);
+    toast(`${S.radarFrames.length} radar frames loaded (${past.length} observed, ${nowcast.length} forecast)`);
+  }catch(e){
+    console.error(e);
+    toast("Radar feed unavailable");
+  }
+}
+
+function showRadarFrame(idx){
+  if(!S.radarFrames.length) return;
+  idx = Math.max(0, Math.min(S.radarFrames.length-1, idx));
+  S.radarIndex = idx;
+  const f = S.radarFrames[idx];
+  const url = `https://tilecache.rainviewer.com${f.path}/256/{z}/{x}/{y}/2/1_1.png`;
+  if(S.radarLayer) S.map.removeLayer(S.radarLayer);
+  S.radarLayer = L.tileLayer(url, {opacity:0.75, maxZoom:12});
+  S.radarLayer.addTo(S.map);
+  const t = new Date(f.time*1000);
+  $("radarFrameTime").textContent = fmtTime(t)+" · "+fmtShortDate(t);
+  const badge = $("radarFrameBadge");
+  if(f.kind === "observed"){
+    badge.textContent = "OBSERVED"; badge.className = "badge observed";
+  }else{
+    badge.textContent = "FORECAST (extrapolated)"; badge.className = "badge derived";
+  }
+  $("radarSlider").value = idx;
+}
+
+$("radarSlider").addEventListener("input", e=> showRadarFrame(parseInt(e.target.value)));
+$("radarPrev").addEventListener("click", ()=>{ stopPlay(); showRadarFrame(S.radarIndex-1); });
+$("radarNext").addEventListener("click", ()=>{ stopPlay(); showRadarFrame(S.radarIndex+1); });
+$("radarPlay").addEventListener("click", ()=>{
+  if(S.playing) stopPlay(); else startPlay();
+});
+function startPlay(){
+  S.playing = true;
+  $("radarPlay").innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>`;
+  S.playTimer = setInterval(()=>{
+    let next = S.radarIndex+1;
+    if(next >= S.radarFrames.length) next = 0;
+    showRadarFrame(next);
+  }, 500);
+}
+function stopPlay(){
+  S.playing = false;
+  clearInterval(S.playTimer);
+  $("radarPlay").innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
+}
+
+/* ---- Storm motion estimate (experimental) ---- */
+function latLonToTileXY(lat, lon, z){
+  const x = Math.floor((lon+180)/360 * Math.pow(2,z));
+  const rad = lat*Math.PI/180;
+  const y = Math.floor((1 - Math.log(Math.tan(rad)+1/Math.cos(rad))/Math.PI)/2 * Math.pow(2,z));
+  return {x,y};
+}
+function loadTileImage(url){
+  return new Promise((resolve,reject)=>{
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = ()=>resolve(img);
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+function centroidOf(img){
+  const c = document.createElement("canvas");
+  c.width = img.width; c.height = img.height;
+  const ctx = c.getContext("2d");
+  ctx.drawImage(img,0,0);
+  let data;
+  try{ data = ctx.getImageData(0,0,c.width,c.height).data; }
+  catch(e){ throw new Error("tainted-canvas"); }
+  let sx=0, sy=0, sw=0;
+  for(let py=0; py<c.height; py+=2){
+    for(let px=0; px<c.width; px+=2){
+      const idx = (py*c.width+px)*4;
+      const a = data[idx+3];
+      if(a > 40){ sx += px*a; sy += py*a; sw += a; }
+    }
+  }
+  if(sw === 0) return null;
+  return {x: sx/sw, y: sy/sw, weight: sw, w:c.width, h:c.height};
+}
+
+$("analyzeMotionBtn").addEventListener("click", async ()=>{
+  const btn = $("analyzeMotionBtn");
+  const past = S.radarFrames.filter(f=>f.kind==="observed");
+  if(past.length < 2){ toast("Need at least 2 observed frames"); return; }
+  btn.disabled = true; btn.textContent = "Analyzing…";
+  try{
+    const f1 = past[past.length-2], f2 = past[past.length-1];
+    const center = S.map.getCenter();
+    const z = 7;
+    const {x,y} = latLonToTileXY(center.lat, center.lng, z);
+    const u1 = `https://tilecache.rainviewer.com${f1.path}/256/${z}/${x}/${y}/2/1_1.png`;
+    const u2 = `https://tilecache.rainviewer.com${f2.path}/256/${z}/${x}/${y}/2/1_1.png`;
+    const [img1, img2] = await Promise.all([loadTileImage(u1), loadTileImage(u2)]);
+    const c1 = centroidOf(img1), c2 = centroidOf(img2);
+    if(!c1 || !c2){ toast("No reflectivity detected in this tile to track"); btn.disabled=false; btn.textContent="Estimate motion & path"; return; }
+    const dxPix = c2.x - c1.x, dyPix = c2.y - c1.y;
+    const metersPerPixel = 156543.03392 * Math.cos(center.lat*Math.PI/180) / Math.pow(2,z) * (1); // 256px tile, z zoom
+    const dxM = dxPix * metersPerPixel, dyM = dyPix * metersPerPixel;
+    const distM = Math.sqrt(dxM*dxM+dyM*dyM);
+    const dtSec = Math.abs(f2.time - f1.time);
+    const speedMps = dtSec>0 ? distM/dtSec : 0;
+    const speedMph = speedMps * 2.23694;
+    // bearing storm is MOVING toward (image y grows downward = south)
+    const bearingTo = (Math.atan2(dxM, -dyM) * 180/Math.PI + 360) % 360;
+    const bearingFrom = (bearingTo + 180) % 360;
+
+    $("motionDir").textContent = deg2compass(bearingFrom);
+    $("motionSpeed").textContent = (speedMph<1 ? "<1" : Math.round(speedMph)) + " mph";
+    $("motionResult").style.display = "block";
+
+    // project forward 30 min from current map center as a stand-in point
+    const projMin = 30;
+    const projM = speedMps * projMin * 60;
+    const bearRad = bearingTo*Math.PI/180;
+    const dLat = (projM * Math.cos(bearRad)) / 111320;
+    const dLon = (projM * Math.sin(bearRad)) / (111320*Math.cos(center.lat*Math.PI/180));
+    const projLat = center.lat + dLat, projLon = center.lng + dLon;
+
+    if(S.motionLayer) S.map.removeLayer(S.motionLayer);
+    S.motionLayer = L.layerGroup().addTo(S.map);
+    L.polyline([[center.lat,center.lng],[projLat,projLon]], {color:"#ff9f0a", weight:2, dashArray:"5,6"}).addTo(S.motionLayer);
+    L.circleMarker([projLat,projLon], {radius:6, color:"#ff9f0a", fillColor:"#ff9f0a", fillOpacity:0.8}).addTo(S.motionLayer)
+      .bindPopup("Projected position (~"+projMin+" min) — derived estimate");
+
+    $("motionTowns").innerHTML = `<div class="empty" style="padding:10px 0">Looking up nearby places…</div>`;
+    try{
+      const place = await reverseGeocode(projLat, projLon);
+      $("motionTowns").innerHTML = `<div class="callout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg><span>Projected track passes near <b>${place}</b> in roughly ${projMin} minutes at this speed and direction — approximate, single-vector estimate only.</span></div>`;
+    }catch(e){
+      $("motionTowns").innerHTML = `<div class="empty">Nearby-place lookup unavailable</div>`;
+    }
+  }catch(e){
+    console.error(e);
+    if(String(e.message).includes("tainted")){
+      toast("Motion analysis blocked by browser cross-origin policy for this tile source");
+    }else{
+      toast("Motion analysis failed — try again");
+    }
+  }
+  btn.disabled = false; btn.textContent = "Estimate motion & path";
+});
+
+/* ============================================================
+   SATELLITE — NOAA STAR GOES CDN
+============================================================ */
+function satUrl(){
+  const {satSat, satBand, satViewMode} = S;
+  const base = `https://cdn.star.nesdis.noaa.gov/GOES${satSat}/ABI/CONUS/${satBand}`;
+  if(satViewMode === "loop"){
+    return `${base}/GOES${satSat}-CONUS-${satBand}-625x375.gif?t=${Math.floor(Date.now()/300000)}`;
+  }
+  return `${base}/1250x750.jpg?t=${Date.now()}`;
+}
+function refreshSat(){
+  $("satImg").src = satUrl();
+  const satLabel = S.satSat === "19" ? "GOES-East (19)" : "GOES-West (18)";
+  $("satTimeTag").textContent = satLabel+" · CONUS · "+S.satBand+(S.satViewMode==="loop"?" · loop":"")+" · "+fmtTime(new Date());
+}
+document.querySelectorAll("#satSegment button").forEach(b=>b.addEventListener("click", ()=>{
+  document.querySelectorAll("#satSegment button").forEach(x=>x.classList.remove("on")); b.classList.add("on");
+  S.satSat = b.dataset.sat; refreshSat();
+}));
+document.querySelectorAll("#bandSegment button").forEach(b=>b.addEventListener("click", ()=>{
+  document.querySelectorAll("#bandSegment button").forEach(x=>x.classList.remove("on")); b.classList.add("on");
+  S.satBand = b.dataset.band; refreshSat();
+}));
+document.querySelectorAll("#viewSegment button").forEach(b=>b.addEventListener("click", ()=>{
+  document.querySelectorAll("#viewSegment button").forEach(x=>x.classList.remove("on")); b.classList.add("on");
+  S.satViewMode = b.dataset.viewMode; refreshSat();
+}));
+$("satRefresh").addEventListener("click", ()=>{ refreshSat(); toast("Satellite image refreshed"); });
+
+/* ============================================================
+   ALERTS — api.weather.gov + SPC images
+============================================================ */
+const SEV_COLOR = {
+  "Tornado Warning": "#ff453a",
+  "Severe Thunderstorm Warning": "#ff9f0a",
+  "Tornado Watch": "#c964e0",
+  "Severe Thunderstorm Watch": "#4da3ff",
+  "Flash Flood Warning": "#34c759",
+  "Special Weather Statement": "#8b96a5",
+};
+function sevColor(event){ return SEV_COLOR[event] || "#8b96a5"; }
+
+async function loadAlerts(){
+  $("alertsList").innerHTML = `<div class="empty">Loading…</div>`;
+  try{
+    const j = await getJSON(`https://api.weather.gov/alerts/active?point=${S.lat},${S.lon}`);
+    const feats = j.features || [];
+    if(!feats.length){
+      $("alertsList").innerHTML = `<div class="empty">No active watches or warnings for this location right now.</div>`;
+      return;
+    }
+    let convData = null;
+    try{
+      convData = await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${S.lat}&longitude=${S.lon}&hourly=cape,convective_inhibition,wind_speed_10m,wind_speed_500hPa&forecast_days=1&wind_speed_unit=mph`);
+    }catch(e){}
+
+    $("alertsList").innerHTML = feats.map((f, idx)=>renderAlertCard(f, idx, convData)).join("");
+
+    feats.forEach((f, idx)=>{
+      $("expand-"+idx)?.addEventListener("click", ()=>{
+        const el = $("text-"+idx);
+        el.classList.toggle("open");
+        $("expand-"+idx).textContent = el.classList.contains("open") ? "Hide full text ▲" : "Show full text ▼";
+      });
+    });
+  }catch(e){
+    console.error(e);
+    $("alertsList").innerHTML = `<div class="empty">Unable to reach NWS alerts feed right now.</div>`;
+  }
+}
+
+function renderAlertCard(f, idx, convData){
+  const p = f.properties;
+  const color = sevColor(p.event);
+  const ends = p.ends ? new Date(p.ends) : (p.expires ? new Date(p.expires) : null);
+  const started = p.onset ? new Date(p.onset) : new Date(p.sent);
+
+  let derived = "";
+  if(/tornado|severe thunderstorm/i.test(p.event) && convData){
+    const i = nearestIdx(convData.hourly.time);
+    const cape = convData.hourly.cape ? convData.hourly.cape[i] : null;
+    const cin = convData.hourly.convective_inhibition ? convData.hourly.convective_inhibition[i] : null;
+    let torRisk=10, windRisk=15, hailRisk=15, devRisk=15;
+    if(cape!=null){
+      devRisk = Math.min(95, Math.round(cape/40));
+      windRisk = Math.min(90, Math.round(cape/45));
+      hailRisk = Math.min(90, Math.round(cape/50));
+      torRisk = Math.min(85, Math.round(cape/60) - (cin && cin < -100 ? 15 : 0));
+      if(/tornado warning/i.test(p.event)) torRisk = Math.max(torRisk, 55);
+      torRisk = Math.max(5, torRisk);
+    }
+    derived = `<div class="derived-panel">
+      <div class="derived-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="13" height="13"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        DERIVED ANALYSIS — HEURISTIC, NOT AN OFFICIAL SPC/NWS PROBABILITY
+      </div>
+      <div class="risk-bars">
+        ${riskRow("Tornado", torRisk, "#c964e0")}
+        ${riskRow("Damaging wind", windRisk, "#ff9f0a")}
+        ${riskRow("Large hail", hailRisk, "#4da3ff")}
+        ${riskRow("Storm development", devRisk, "#ff453a")}
+      </div>
+      <div class="stat-sub" style="margin-top:8px">Based on this location's current model CAPE${cin!=null?' and CIN':''} — a simple rule-of-thumb scaling, not a calibrated forecast model.</div>
+    </div>`;
+  }
+
+  return `<div class="alert-card">
+    <div class="sev-strip" style="background:${color}"></div>
+    <div class="alert-head">
+      <div>
+        <div class="alert-title" style="color:${color}">${p.event}</div>
+        <div class="alert-area">${p.areaDesc}</div>
+      </div>
+      <span class="badge observed">NWS</span>
+    </div>
+    <div class="alert-body">
+      <div class="alert-meta-row">
+        <div class="alert-meta">Issued<b>${fmtTime(started)}</b></div>
+        <div class="alert-meta">${ends?'Until':'Expires'}<b>${ends?fmtTime(ends):'—'}</b></div>
+        <div class="alert-meta">Severity<b>${p.severity||'—'}</b></div>
+        <div class="alert-meta">Certainty<b>${p.certainty||'—'}</b></div>
+      </div>
+      <span class="expand-btn" id="expand-${idx}">Show full text ▼</span>
+      <div class="alert-text" id="text-${idx}">${(p.description||"No detailed text provided.").replace(/</g,"&lt;")}${p.instruction ? "\\n\\nINSTRUCTIONS:\\n"+p.instruction.replace(/</g,"&lt;") : ""}</div>
+      ${derived}
+    </div>
+  </div>`;
+}
+function riskRow(label, val, color){
+  val = Math.max(0, Math.min(100, val||0));
+  return `<div class="risk-row"><div class="risk-label">${label}</div><div class="risk-track"><div class="risk-fill" style="width:${val}%; background:${color}"></div></div><div class="risk-val">${val}%</div></div>`;
+}
+
+function refreshSPC(){
+  $("spcImg").src = `https://www.spc.noaa.gov/products/outlook/day${S.spcDay}otlk.gif?t=${Date.now()}`;
+}
+document.querySelectorAll("#spcSegment button").forEach(b=>b.addEventListener("click", ()=>{
+  document.querySelectorAll("#spcSegment button").forEach(x=>x.classList.remove("on")); b.classList.add("on");
+  S.spcDay = b.dataset.day; refreshSPC();
+}));
+
+/* ============================================================
+   RESEARCH — persistent storage
+============================================================ */
+document.querySelectorAll("#tagSegment button").forEach(b=>b.addEventListener("click", ()=>{
+  document.querySelectorAll("#tagSegment button").forEach(x=>x.classList.remove("on")); b.classList.add("on");
+}));
+
+async function loadResearch(){
+  try{
+    const t = await window.storage.get("timeline");
+    S.timeline = t ? JSON.parse(t.value) : [];
+  }catch(e){ S.timeline = []; }
+  try{
+    const d = await window.storage.get("docs");
+    S.docs = d ? JSON.parse(d.value) : [];
+  }catch(e){ S.docs = []; }
+  renderTimeline();
+  renderDocs();
+}
+async function saveTimeline(){
+  try{ await window.storage.set("timeline", JSON.stringify(S.timeline)); }catch(e){ console.error(e); }
+}
+async function saveDocs(){
+  try{ await window.storage.set("docs", JSON.stringify(S.docs)); }catch(e){ console.error(e); }
+}
+
+function renderTimeline(){
+  if(!S.timeline.length){
+    $("timelineCard").innerHTML = `<div class="empty">No entries yet — your logged observations will appear here.</div>`;
+    return;
+  }
+  const sorted = [...S.timeline].sort((a,b)=> b.ts - a.ts);
+  $("timelineCard").innerHTML = sorted.map((e,i)=>`
+    <div class="tl-item">
+      <div class="tl-dot-col"><div class="tl-dot"></div>${i<sorted.length-1?'<div class="tl-line"></div>':''}</div>
+      <div style="flex:1">
+        <div class="tl-time">${new Date(e.ts).toLocaleString([], {month:"short", day:"numeric", hour:"numeric", minute:"2-digit"})} · ${e.loc||""}</div>
+        <div class="tl-note">${(e.text||"").replace(/</g,"&lt;")}</div>
+        <span class="tl-tag">${e.tag}</span>
+      </div>
+    </div>`).join("");
+}
+
+function renderDocs(){
+  if(!S.docs.length){ $("docsList").innerHTML = ""; return; }
+  $("docsList").innerHTML = S.docs.map((doc,i)=>`
+    <div class="doc-row">
+      <div><div class="doc-name">${doc.name}</div><div class="doc-size">${(doc.content.length/1024).toFixed(1)} KB · ${new Date(doc.ts).toLocaleDateString()}</div></div>
+      <button class="hbtn" data-del="${i}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m5 0V4a2 2 0 012-2h0a2 2 0 012 2v2"/></svg></button>
+    </div>`).join("");
+  document.querySelectorAll("[data-del]").forEach(btn=>btn.addEventListener("click", async ()=>{
+    S.docs.splice(parseInt(btn.dataset.del),1);
+    await saveDocs(); renderDocs();
+  }));
+}
+
+$("addNoteBtn").addEventListener("click", async ()=>{
+  const text = $("noteInput").value.trim();
+  if(!text){ toast("Write something first"); return; }
+  const tag = document.querySelector("#tagSegment button.on").dataset.tag;
+  S.timeline.push({ts: Date.now(), text, tag, loc: S.name});
+  await saveTimeline();
+  $("noteInput").value = "";
+  renderTimeline();
+  toast("Added to timeline");
+});
+
+$("fileDrop").addEventListener("click", ()=> $("fileInput").click());
+$("fileInput").addEventListener("change", (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = async ()=>{
+    S.docs.push({name:file.name, content: reader.result, ts: Date.now()});
+    await saveDocs();
+    renderDocs();
+    toast("Attached "+file.name);
+  };
+  reader.readAsText(file);
+  e.target.value = "";
+});
+
+function buildExportText(){
+  let out = "MERIDIAN STORM RESEARCH LOG\\n";
+  out += "Location: "+S.name+" ("+S.lat.toFixed(3)+", "+S.lon.toFixed(3)+")\\n";
+  out += "Exported: "+new Date().toLocaleString()+"\\n";
+  out += "".padEnd(50,"=")+"\\n\\n";
+  out += "TIMELINE\\n"+"".padEnd(50,"-")+"\\n";
+  [...S.timeline].sort((a,b)=>a.ts-b.ts).forEach(e=>{
+    out += "["+new Date(e.ts).toLocaleString()+"] ("+e.tag+") "+e.loc+"\\n"+e.text+"\\n\\n";
+  });
+  if(S.docs.length){
+    out += "\\nATTACHED DOCUMENTS\\n"+"".padEnd(50,"-")+"\\n";
+    S.docs.forEach(d=>{ out += "--- "+d.name+" ---\\n"+d.content+"\\n\\n"; });
+  }
+  return out;
+}
+$("exportTxtBtn").addEventListener("click", ()=>{
+  if(!S.timeline.length && !S.docs.length){ toast("Nothing to export yet"); return; }
+  const blob = new Blob([buildExportText()], {type:"text/plain"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "storm-research-log.txt";
+  a.click();
+});
+$("exportPdfBtn").addEventListener("click", ()=>{
+  if(!S.timeline.length && !S.docs.length){ toast("Nothing to export yet"); return; }
+  try{
+    const {jsPDF} = window.jspdf;
+    const doc = new jsPDF({unit:"pt"});
+    const margin = 40; let y = margin;
+    doc.setFont("helvetica","bold"); doc.setFontSize(16);
+    doc.text("Meridian Storm Research Log", margin, y); y+=22;
+    doc.setFont("helvetica","normal"); doc.setFontSize(10);
+    doc.text(S.name+"  ·  "+S.lat.toFixed(3)+", "+S.lon.toFixed(3), margin, y); y+=14;
+    doc.text("Exported "+new Date().toLocaleString(), margin, y); y+=22;
+    doc.setDrawColor(200); doc.line(margin, y, 555, y); y+=18;
+    doc.setFont("helvetica","bold"); doc.setFontSize(12); doc.text("Timeline", margin, y); y+=16;
+    doc.setFont("helvetica","normal"); doc.setFontSize(10);
+    [...S.timeline].sort((a,b)=>a.ts-b.ts).forEach(e=>{
+      if(y>760){ doc.addPage(); y=margin; }
+      doc.setFont("helvetica","bold");
+      doc.text(new Date(e.ts).toLocaleString()+"  ["+e.tag+"]", margin, y); y+=13;
+      doc.setFont("helvetica","normal");
+      const lines = doc.splitTextToSize(e.text, 500);
+      doc.text(lines, margin, y); y += lines.length*13 + 10;
+    });
+    doc.save("storm-research-log.pdf");
+  }catch(e){
+    console.error(e); toast("PDF export failed");
+  }
+});
+$("clearAllBtn").addEventListener("click", async ()=>{
+  if(!confirm("Clear all notes, timeline entries, and attached documents? This cannot be undone.")) return;
+  S.timeline = []; S.docs = [];
+  await saveTimeline(); await saveDocs();
+  renderTimeline(); renderDocs();
+  toast("Research data cleared");
+});
+
+/* ============================================================
+   INIT
+============================================================ */
+function loadAll(){
+  loadDashboard();
+  loadRadar();
+  loadAlerts();
+  refreshSat();
+  refreshSPC();
+}
+
+initMap();
+initLocation();
+loadResearch();
+refreshSat();
+refreshSPC();
+
+})();
+</script>
+</body>
+</html>
